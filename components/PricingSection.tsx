@@ -27,7 +27,16 @@ export default function PricingSection({ pricingTiers }: PricingSectionProps) {
         <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
           {pricingTiers.map((tier) => {
             const features = tier.metadata?.features?.split('\n').filter(Boolean) || []
-            const isFeatured = tier.metadata?.is_featured || false
+            const isFeatured = tier.metadata?.is_featured === true
+            const tierName = tier.metadata?.tier_name || tier.title
+            const priceDisplay = tier.metadata?.price_display || '$0/month'
+            const ctaText = tier.metadata?.cta_text || 'Get Started'
+            const ctaLink = tier.metadata?.cta_link || '/signup'
+            
+            // Safely split price display
+            const priceParts = priceDisplay.split('/')
+            const priceAmount = priceParts[0] || '$0'
+            const pricePeriod = priceParts[1] || 'month'
             
             return (
               <div
@@ -50,14 +59,14 @@ export default function PricingSection({ pricingTiers }: PricingSectionProps) {
                 {/* Tier Header */}
                 <div className="text-center mb-8">
                   <h3 className="text-2xl font-bold mb-2">
-                    {tier.metadata?.tier_name || tier.title}
+                    {tierName}
                   </h3>
                   <div className="flex items-center justify-center">
                     <span className="text-5xl font-bold">
-                      {tier.metadata?.price_display?.split('/')[0] || '$0'}
+                      {priceAmount}
                     </span>
                     <span className={`ml-2 ${isFeatured ? 'text-primary-200' : 'text-gray-500'}`}>
-                      /{tier.metadata?.price_display?.split('/')[1] || 'month'}
+                      /{pricePeriod}
                     </span>
                   </div>
                 </div>
@@ -82,18 +91,18 @@ export default function PricingSection({ pricingTiers }: PricingSectionProps) {
 
                 {/* CTA Button */}
                 <Link
-                  href={tier.metadata?.cta_link || '/signup'}
+                  href={ctaLink}
                   className={`block w-full text-center py-4 px-6 rounded-lg font-semibold transition-colors duration-200 ${
                     isFeatured
                       ? 'bg-white text-primary-600 hover:bg-gray-100'
                       : 'bg-primary-600 text-white hover:bg-primary-700'
                   }`}
                 >
-                  {tier.metadata?.cta_text || 'Get Started'}
+                  {ctaText}
                 </Link>
 
                 {/* Additional Info */}
-                {tier.metadata?.tier_name?.toLowerCase() === 'pro' && (
+                {tierName.toLowerCase() === 'pro' && (
                   <p className={`text-center text-sm mt-4 ${
                     isFeatured ? 'text-primary-200' : 'text-gray-500'
                   }`}>

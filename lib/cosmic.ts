@@ -20,7 +20,7 @@ export async function getLandingPage(): Promise<LandingPage | null> {
       .props(['id', 'title', 'slug', 'metadata'])
       .depth(1);
     
-    const landingPage = response.objects[0] as LandingPage;
+    const landingPage = response.objects[0] as LandingPage | undefined;
     
     if (!landingPage) {
       return null;
@@ -45,10 +45,10 @@ export async function getPricingTiers(): Promise<PricingTier[]> {
     
     const tiers = response.objects as PricingTier[];
     
-    // Sort by display_order
+    // Sort by display_order with proper null handling
     return tiers.sort((a, b) => {
-      const orderA = a.metadata?.display_order || 0;
-      const orderB = b.metadata?.display_order || 0;
+      const orderA = a.metadata?.display_order ?? 0;
+      const orderB = b.metadata?.display_order ?? 0;
       return orderA - orderB;
     });
   } catch (error) {
@@ -80,8 +80,13 @@ export async function createUser(userData: {
       }
     });
     
+    if (!response.object?.id) {
+      throw new Error('Failed to create user - no ID returned');
+    }
+    
     return response.object.id;
   } catch (error) {
+    console.error('Error creating user:', error);
     throw new Error('Failed to create user record');
   }
 }
@@ -106,27 +111,34 @@ export async function findUserByEmail(email: string) {
   }
 }
 
-// Update user record
+// Update user record with proper minimal metadata updates
 export async function updateUser(userId: string, updates: {
   plan?: string;
   stripeCustomerId?: string;
   subscriptionStatus?: string;
 }): Promise<void> {
   try {
-    const metadata: Record<string, any> = {};
+    const metadata: Record<string, string> = {};
     
-    if (updates.plan) {
+    // Only include fields that are being updated
+    if (updates.plan !== undefined) {
       metadata.plan = updates.plan;
     }
-    if (updates.stripeCustomerId) {
+    if (updates.stripeCustomerId !== undefined) {
       metadata.stripe_customer_id = updates.stripeCustomerId;
     }
-    if (updates.subscriptionStatus) {
+    if (updates.subscriptionStatus !== undefined) {
       metadata.subscription_status = updates.subscriptionStatus;
+    }
+    
+    // Only proceed if there are actual updates
+    if (Object.keys(metadata).length === 0) {
+      return;
     }
     
     await cosmic.objects.updateOne(userId, { metadata });
   } catch (error) {
+    console.error('Error updating user:', error);
     throw new Error('Failed to update user record');
   }
 }

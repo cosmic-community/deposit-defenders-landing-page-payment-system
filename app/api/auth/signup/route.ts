@@ -9,14 +9,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as SignupData
     const { email, password, plan } = body
 
-    // Validation
+    // Validation with proper type safety
     const errors: FormErrors = {}
     
-    if (!email || !email.includes('@')) {
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
       errors.email = 'Please enter a valid email address'
     }
     
-    if (!password || password.length < 6) {
+    if (!password || typeof password !== 'string' || password.length < 6) {
       errors.password = 'Password must be at least 6 characters'
     }
     
@@ -38,26 +38,54 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 12)
+    // Hash password with proper error handling
+    let hashedPassword: string;
+    try {
+      hashedPassword = await bcrypt.hash(password, 12);
+    } catch (hashError) {
+      console.error('Password hashing failed:', hashError);
+      return NextResponse.json(
+        { errors: { general: 'Failed to process password' } },
+        { status: 500 }
+      );
+    }
 
     // Create user in Cosmic
-    const userId = await createUser({
-      email,
-      hashedPassword,
-      plan
-    })
+    let userId: string;
+    try {
+      userId = await createUser({
+        email,
+        hashedPassword,
+        plan
+      });
+    } catch (createError) {
+      console.error('User creation failed:', createError);
+      return NextResponse.json(
+        { errors: { general: 'Failed to create user account' } },
+        { status: 500 }
+      );
+    }
 
-    // Generate JWT token
-    const token = generateToken({
-      userId,
-      email,
-      plan
-    })
+    // Generate JWT token with proper error handling
+    let token: string;
+    try {
+      token = generateToken({
+        userId,
+        email,
+        plan
+      });
+    } catch (tokenError) {
+      console.error('Token generation failed:', tokenError);
+      return NextResponse.json(
+        { errors: { general: 'Failed to generate authentication token' } },
+        { status: 500 }
+      );
+    }
 
     // Create response
     const response = NextResponse.json({
       success: true,
+      token, // Include token in response for client-side storage
       user: {
         id: userId,
         email,
@@ -65,26 +93,20 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Set HTTP-only cookie
+    // Set HTTP-only cookie with proper configuration
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 60 * 60 * 24 * 7 // 7 days
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      path: '/'
     })
 
     // For pro plan, we would handle Stripe subscription here
     if (plan === 'pro') {
       // TODO: Integrate with Stripe for subscription creation
       // This would be handled in a separate payment flow
-    }
-
-    // Verify response exists before accessing metadata
-    if (!response) {
-      return NextResponse.json(
-        { errors: { general: 'Failed to create response' } },
-        { status: 500 }
-      )
+      console.log('Pro plan signup - Stripe integration needed');
     }
 
     return response
@@ -92,7 +114,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Signup error:', error)
     return NextResponse.json(
-      { errors: { general: 'An error occurred during signup' } },
+      { errors: { general: 'An unexpected error occurred during signup' } },
       { status: 500 }
     )
   }

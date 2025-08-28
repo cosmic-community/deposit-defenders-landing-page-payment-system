@@ -70,11 +70,11 @@ export interface LoginData {
   password: string;
 }
 
-// Payment types
+// Payment types - Fixed to match current Stripe API
 export interface PaymentIntentData {
   amount: number;
   currency: string;
-  email: string;
+  receipt_email: string; // Changed from 'email' to 'receipt_email' to match Stripe API
   plan: string;
 }
 
@@ -98,6 +98,21 @@ export interface JWTPayload {
   plan: string;
   iat: number;
   exp: number;
+}
+
+// Stripe-specific types to ensure type safety
+export interface StripeCustomer {
+  id: string;
+  email: string;
+  created: number;
+}
+
+export interface StripePaymentIntent {
+  id: string;
+  client_secret: string;
+  amount: number;
+  currency: string;
+  status: string;
 }
 
 // Type guards
