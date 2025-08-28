@@ -70,12 +70,23 @@ export interface LoginData {
   password: string;
 }
 
-// Payment types - Fixed to match current Stripe API
+// Payment types - Updated to match current Stripe API
 export interface PaymentIntentData {
   amount: number;
   currency: string;
-  receipt_email: string; // Changed from 'email' to 'receipt_email' to match Stripe API
+  receipt_email: string; // Correct property name for Stripe API
   plan: string;
+}
+
+// Stripe PaymentIntent creation parameters (matching current Stripe API)
+export interface StripePaymentIntentParams {
+  amount: number;
+  currency: string;
+  receipt_email?: string; // Optional receipt email
+  metadata?: Record<string, string>;
+  automatic_payment_methods?: {
+    enabled: boolean;
+  };
 }
 
 export interface SubscriptionData {

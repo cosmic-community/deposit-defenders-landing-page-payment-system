@@ -1,135 +1,124 @@
-import Stripe from 'stripe'
+import Stripe from 'stripe';
+import type { StripePaymentIntentParams } from '@/types';
 
 if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY environment variable is not set')
+  throw new Error('Missing STRIPE_SECRET_KEY environment variable');
 }
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2024-06-20',
-  typescript: true,
-})
+  apiVersion: '2024-11-20.acacia', // Updated to current API version
+});
 
-// Price IDs for different plans
-export const PRICE_IDS = {
-  pro: process.env.STRIPE_PRO_PRICE_ID || 'price_1234567890abcdef',
-} as const
-
-// Create payment intent for one-time payments
-export async function createPaymentIntent(params: {
-  amount: number
-  currency: string
-  customerEmail: string
-  metadata?: Record<string, string>
-}) {
+// Create a PaymentIntent for one-time payments
+export async function createPaymentIntent({
+  amount,
+  currency,
+  receipt_email,
+  metadata = {}
+}: StripePaymentIntentParams): Promise<Stripe.PaymentIntent> {
   try {
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: params.amount,
-      currency: params.currency,
-      customer_email: params.customerEmail,
-      metadata: params.metadata || {},
+      amount,
+      currency,
+      receipt_email, // Correct property name for Stripe API
+      metadata,
       automatic_payment_methods: {
         enabled: true,
       },
-    })
+    });
 
-    return paymentIntent
+    return paymentIntent;
   } catch (error) {
-    console.error('Error creating payment intent:', error)
-    throw new Error('Failed to create payment intent')
+    console.error('Error creating payment intent:', error);
+    throw new Error('Failed to create payment intent');
   }
 }
 
-// Create customer
-export async function createCustomer(params: {
-  email: string
-  name?: string
-  metadata?: Record<string, string>
-}) {
+// Create a customer
+export async function createCustomer(email: string, name?: string): Promise<Stripe.Customer> {
   try {
     const customer = await stripe.customers.create({
-      email: params.email,
-      name: params.name,
-      metadata: params.metadata || {},
-    })
+      email,
+      name,
+    });
 
-    return customer
+    return customer;
   } catch (error) {
-    console.error('Error creating customer:', error)
-    throw new Error('Failed to create customer')
+    console.error('Error creating customer:', error);
+    throw new Error('Failed to create customer');
   }
 }
 
-// Create subscription
-export async function createSubscription(params: {
-  customerId: string
-  priceId: string
-  paymentMethodId: string
-}) {
+// Create a subscription
+export async function createSubscription({
+  customerId,
+  priceId,
+  paymentMethodId
+}: {
+  customerId: string;
+  priceId: string;
+  paymentMethodId: string;
+}): Promise<Stripe.Subscription> {
   try {
     // Attach payment method to customer
-    await stripe.paymentMethods.attach(params.paymentMethodId, {
-      customer: params.customerId,
-    })
+    await stripe.paymentMethods.attach(paymentMethodId, {
+      customer: customerId,
+    });
 
     // Set as default payment method
-    await stripe.customers.update(params.customerId, {
+    await stripe.customers.update(customerId, {
       invoice_settings: {
-        default_payment_method: params.paymentMethodId,
+        default_payment_method: paymentMethodId,
       },
-    })
+    });
 
     // Create subscription
     const subscription = await stripe.subscriptions.create({
-      customer: params.customerId,
-      items: [{ price: params.priceId }],
-      payment_behavior: 'default_incomplete',
-      payment_settings: { save_default_payment_method: 'on_subscription' },
+      customer: customerId,
+      items: [{ price: priceId }],
+      default_payment_method: paymentMethodId,
       expand: ['latest_invoice.payment_intent'],
-    })
+    });
 
-    return subscription
+    return subscription;
   } catch (error) {
-    console.error('Error creating subscription:', error)
-    throw new Error('Failed to create subscription')
+    console.error('Error creating subscription:', error);
+    throw new Error('Failed to create subscription');
+  }
+}
+
+// Get customer by ID
+export async function getCustomer(customerId: string): Promise<Stripe.Customer | null> {
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    return customer as Stripe.Customer;
+  } catch (error) {
+    console.error('Error retrieving customer:', error);
+    return null;
   }
 }
 
 // Cancel subscription
-export async function cancelSubscription(subscriptionId: string) {
+export async function cancelSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
   try {
-    const subscription = await stripe.subscriptions.cancel(subscriptionId)
-    return subscription
+    const subscription = await stripe.subscriptions.cancel(subscriptionId);
+    return subscription;
   } catch (error) {
-    console.error('Error canceling subscription:', error)
-    throw new Error('Failed to cancel subscription')
-  }
-}
-
-// Get customer by email
-export async function getCustomerByEmail(email: string) {
-  try {
-    const customers = await stripe.customers.list({
-      email: email,
-      limit: 1,
-    })
-
-    return customers.data[0] || null
-  } catch (error) {
-    console.error('Error fetching customer:', error)
-    throw new Error('Failed to fetch customer')
+    console.error('Error canceling subscription:', error);
+    throw new Error('Failed to cancel subscription');
   }
 }
 
 // Webhook signature verification
-export function verifyWebhookSignature(
+export function constructWebhookEvent(
   payload: string | Buffer,
   signature: string,
   secret: string
-) {
+): Stripe.Event {
   try {
-    return stripe.webhooks.constructEvent(payload, signature, secret)
+    return stripe.webhooks.constructEvent(payload, signature, secret);
   } catch (error) {
-    console.error('Webhook signature verification failed:', error)
-    throw new Error('Invalid webhook signature')
+    console.error('Webhook signature verification failed:', error);
+    throw new Error('Invalid webhook signature');
   }
 }
