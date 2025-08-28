@@ -1,86 +1,88 @@
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import type { JWTPayload } from '@/types';
+import jwt from 'jsonwebtoken'
+import type { JWTPayload } from '@/types'
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
-  throw new Error('Missing JWT_SECRET environment variable');
+// Ensure JWT_SECRET exists or provide fallback
+const getJWTSecret = (): string => {
+  const secret = process.env.JWT_SECRET
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not defined')
+  }
+  return secret
 }
 
-// Hash password
-export async function hashPassword(password: string): Promise<string> {
-  const saltRounds = 12;
-  return bcrypt.hash(password, saltRounds);
-}
-
-// Verify password
-export async function verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
-  return bcrypt.compare(password, hashedPassword);
-}
-
-// Create JWT token
-export function createToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: '7d', // Token expires in 7 days
-  });
+// Generate JWT token
+export function generateToken(payload: {
+  userId: string
+  email: string
+  plan: string
+}): string {
+  const secret = getJWTSecret()
+  
+  return jwt.sign(
+    {
+      userId: payload.userId,
+      email: payload.email,
+      plan: payload.plan
+    },
+    secret,
+    {
+      expiresIn: '7d',
+      issuer: 'deposit-defenders',
+      audience: 'deposit-defenders-users'
+    }
+  )
 }
 
 // Verify JWT token
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
-    return decoded;
+    const secret = getJWTSecret()
+    
+    const decoded = jwt.verify(token, secret, {
+      issuer: 'deposit-defenders',
+      audience: 'deposit-defenders-users'
+    })
+    
+    // Type guard to ensure decoded token has required properties
+    if (
+      typeof decoded === 'object' &&
+      decoded !== null &&
+      'userId' in decoded &&
+      'email' in decoded &&
+      'plan' in decoded &&
+      'iat' in decoded &&
+      'exp' in decoded
+    ) {
+      return decoded as JWTPayload
+    }
+    
+    return null
   } catch (error) {
-    console.error('Token verification failed:', error);
-    return null;
+    console.error('Token verification error:', error)
+    return null
   }
 }
 
-// Extract token from request headers
-export function extractTokenFromHeaders(authHeader: string | null): string | null {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
+// Get user from token
+export function getUserFromToken(token: string) {
+  const payload = verifyToken(token)
   
-  return authHeader.substring(7); // Remove 'Bearer ' prefix
+  if (!payload) {
+    return null
+  }
+
+  return {
+    userId: payload.userId,
+    email: payload.email,
+    plan: payload.plan
+  }
 }
 
-// Password validation
-export function validatePassword(password: string): { isValid: boolean; error?: string } {
-  if (password.length < 8) {
-    return { isValid: false, error: 'Password must be at least 8 characters long' };
+// Middleware helper for protected routes
+export function requireAuth(token?: string) {
+  if (!token) {
+    return null
   }
-  
-  if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
-    return { 
-      isValid: false, 
-      error: 'Password must contain at least one uppercase letter, one lowercase letter, and one number' 
-    };
-  }
-  
-  return { isValid: true };
-}
 
-// Email validation
-export function validateEmail(email: string): { isValid: boolean; error?: string } {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  
-  if (!emailRegex.test(email)) {
-    return { isValid: false, error: 'Please enter a valid email address' };
-  }
-  
-  return { isValid: true };
-}
-
-// Generate secure random string for JWT secret
-export function generateSecureSecret(length: number = 32): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-  let result = '';
-  
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  
-  return result;
+  return getUserFromToken(token)
 }

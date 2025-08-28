@@ -1,107 +1,98 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
-import { hashPassword, createToken, validateEmail, validatePassword } from '@/lib/auth'
+import bcrypt from 'bcryptjs'
 import { createUser, findUserByEmail } from '@/lib/cosmic'
-import { createStripeCustomer } from '@/lib/stripe'
-import { sendWelcomeEmail } from '@/lib/email'
-
-const signupSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  plan: z.enum(['free', 'pro']),
-})
+import { generateToken } from '@/lib/auth'
+import type { SignupData, FormErrors } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { email, password, plan } = signupSchema.parse(body)
+    const body = await request.json() as SignupData
+    const { email, password, plan } = body
 
-    // Validate email format
-    const emailValidation = validateEmail(email)
-    if (!emailValidation.isValid) {
-      return NextResponse.json(
-        { error: emailValidation.error },
-        { status: 400 }
-      )
+    // Validation
+    const errors: FormErrors = {}
+    
+    if (!email || !email.includes('@')) {
+      errors.email = 'Please enter a valid email address'
+    }
+    
+    if (!password || password.length < 6) {
+      errors.password = 'Password must be at least 6 characters'
+    }
+    
+    if (!plan || !['free', 'pro'].includes(plan)) {
+      errors.general = 'Please select a valid plan'
     }
 
-    // Validate password strength
-    const passwordValidation = validatePassword(password)
-    if (!passwordValidation.isValid) {
-      return NextResponse.json(
-        { error: passwordValidation.error },
-        { status: 400 }
-      )
+    if (Object.keys(errors).length > 0) {
+      return NextResponse.json({ errors }, { status: 400 })
     }
 
     // Check if user already exists
     const existingUser = await findUserByEmail(email)
+    
     if (existingUser) {
       return NextResponse.json(
-        { error: 'An account with this email already exists' },
-        { status: 409 }
+        { errors: { email: 'An account with this email already exists' } },
+        { status: 400 }
       )
     }
 
     // Hash password
-    const hashedPassword = await hashPassword(password)
-
-    // Create Stripe customer for Pro plan
-    let stripeCustomerId: string | undefined
-    if (plan === 'pro') {
-      try {
-        stripeCustomerId = await createStripeCustomer(email)
-      } catch (error) {
-        console.error('Failed to create Stripe customer:', error)
-        return NextResponse.json(
-          { error: 'Failed to set up payment account' },
-          { status: 500 }
-        )
-      }
-    }
+    const hashedPassword = await bcrypt.hash(password, 12)
 
     // Create user in Cosmic
     const userId = await createUser({
       email,
       hashedPassword,
-      plan,
-      stripeCustomerId,
+      plan
     })
 
-    // Create JWT token
-    const token = createToken({
+    // Generate JWT token
+    const token = generateToken({
       userId,
       email,
-      plan,
+      plan
     })
 
-    // Send welcome email (async, don't wait)
-    sendWelcomeEmail(email, plan).catch(error => {
-      console.error('Failed to send welcome email:', error)
-    })
-
-    return NextResponse.json({
+    // Create response
+    const response = NextResponse.json({
       success: true,
-      token,
       user: {
         id: userId,
         email,
-        plan,
-      },
+        plan
+      }
     })
 
-  } catch (error) {
-    console.error('Signup error:', error)
+    // Set HTTP-only cookie
+    response.cookies.set('auth-token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 24 * 7 // 7 days
+    })
 
-    if (error instanceof z.ZodError) {
+    // For pro plan, we would handle Stripe subscription here
+    if (plan === 'pro') {
+      // TODO: Integrate with Stripe for subscription creation
+      // This would be handled in a separate payment flow
+    }
+
+    // Verify response exists before accessing metadata
+    if (!response) {
       return NextResponse.json(
-        { error: error.errors[0].message },
-        { status: 400 }
+        { errors: { general: 'Failed to create response' } },
+        { status: 500 }
       )
     }
 
+    return response
+
+  } catch (error) {
+    console.error('Signup error:', error)
     return NextResponse.json(
-      { error: 'Failed to create account. Please try again.' },
+      { errors: { general: 'An error occurred during signup' } },
       { status: 500 }
     )
   }

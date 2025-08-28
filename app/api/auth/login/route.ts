@@ -1,74 +1,89 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
-import { verifyPassword, createToken } from '@/lib/auth'
+import bcrypt from 'bcryptjs'
 import { findUserByEmail } from '@/lib/cosmic'
-
-const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(1, 'Password is required'),
-})
+import { generateToken } from '@/lib/auth'
+import type { LoginData, FormErrors } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { email, password } = loginSchema.parse(body)
+    const body = await request.json() as LoginData
+    const { email, password } = body
+
+    // Validation
+    const errors: FormErrors = {}
+    
+    if (!email || !email.includes('@')) {
+      errors.email = 'Please enter a valid email address'
+    }
+    
+    if (!password || password.length < 6) {
+      errors.password = 'Password must be at least 6 characters'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return NextResponse.json({ errors }, { status: 400 })
+    }
 
     // Find user by email
     const user = await findUserByEmail(email)
+    
     if (!user) {
       return NextResponse.json(
-        { error: 'Invalid email or password' },
+        { errors: { general: 'Invalid email or password' } },
         { status: 401 }
       )
     }
 
     // Verify password
-    const storedPassword = user.metadata?.password
-    if (!storedPassword) {
-      return NextResponse.json(
-        { error: 'Account configuration error' },
-        { status: 500 }
-      )
-    }
-
-    const isValidPassword = await verifyPassword(password, storedPassword)
+    const isValidPassword = await bcrypt.compare(password, user.metadata?.password || '')
+    
     if (!isValidPassword) {
       return NextResponse.json(
-        { error: 'Invalid email or password' },
+        { errors: { general: 'Invalid email or password' } },
         { status: 401 }
       )
     }
 
-    // Create JWT token
-    const token = createToken({
+    // Generate JWT token
+    const token = generateToken({
       userId: user.id,
-      email: user.metadata.email,
-      plan: user.metadata.plan || 'free',
+      email: user.metadata?.email || email,
+      plan: user.metadata?.plan || 'free'
     })
 
-    return NextResponse.json({
+    // Create response with token
+    const response = NextResponse.json({
       success: true,
-      token,
       user: {
         id: user.id,
-        email: user.metadata.email,
-        plan: user.metadata.plan || 'free',
-        subscriptionStatus: user.metadata.subscription_status || null,
-      },
+        email: user.metadata?.email || email,
+        plan: user.metadata?.plan || 'free'
+      }
     })
 
-  } catch (error) {
-    console.error('Login error:', error)
+    // Set HTTP-only cookie
+    response.cookies.set('auth-token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 24 * 7 // 7 days
+    })
 
-    if (error instanceof z.ZodError) {
+    // Verify user object exists before accessing metadata
+    const userMetadata = user.metadata
+    if (!userMetadata) {
       return NextResponse.json(
-        { error: error.errors[0].message },
-        { status: 400 }
+        { errors: { general: 'User data is incomplete' } },
+        { status: 500 }
       )
     }
 
+    return response
+
+  } catch (error) {
+    console.error('Login error:', error)
     return NextResponse.json(
-      { error: 'Login failed. Please try again.' },
+      { errors: { general: 'An error occurred during login' } },
       { status: 500 }
     )
   }
